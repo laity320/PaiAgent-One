@@ -100,11 +100,32 @@ public class LlmNodeHandler extends AbstractNodeHandler {
         Map<String, Object> outputs = new LinkedHashMap<>();
         outputs.put(outputParamName, response.getContent());
 
+        // Record inputs for display
+        Map<String, Object> inputs = new LinkedHashMap<>();
+        inputs.put("model", model);
+        inputs.put("provider", provider);
+        for (Map.Entry<String, String> entry : inputParamValues.entrySet()) {
+            String value = entry.getValue();
+            // Truncate long values
+            if (value != null && value.length() > 200) {
+                value = value.substring(0, 200) + "...";
+            }
+            inputs.put(entry.getKey(), value);
+        }
+        if (resolvedUserPrompt != null && !resolvedUserPrompt.isEmpty()) {
+            String promptPreview = resolvedUserPrompt.length() > 300
+                    ? resolvedUserPrompt.substring(0, 300) + "..."
+                    : resolvedUserPrompt;
+            inputs.put("prompt", promptPreview);
+        }
+
         return NodeResult.builder()
                 .nodeId(node.getId())
                 .nodeName(node.getLabel())
                 .status("SUCCESS")
+                .inputs(inputs)
                 .output(response.getContent())
+                .outputType("text")
                 .outputs(outputs)
                 .build();
     }

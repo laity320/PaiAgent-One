@@ -1,10 +1,13 @@
 package com.paiagent.engine.context;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paiagent.engine.dto.ExecutionEvent;
 import com.paiagent.engine.dto.NodeResult;
 import com.paiagent.engine.model.WorkflowGraph;
 import lombok.Getter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +24,7 @@ public class ExecutionContext {
     private final Map<String, String> labelToNodeId = new LinkedHashMap<>();
     private SseEmitter sseEmitter;
     private WorkflowGraph graph;
+    private ObjectMapper objectMapper;
 
     public ExecutionContext(String executionId, Long userId, Map<String, String> inputParams) {
         this.executionId = executionId;
@@ -34,6 +38,10 @@ public class ExecutionContext {
 
     public void setSseEmitter(SseEmitter emitter) {
         this.sseEmitter = emitter;
+    }
+
+    public void setObjectMapper(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
     public void registerNodeLabel(String nodeId, String label) {
@@ -111,5 +119,26 @@ public class ExecutionContext {
             }
         }
         return null;
+    }
+
+    /**
+     * Send a progress event for a node (used during streaming operations).
+     */
+    public void sendProgressEvent(String nodeId, String label, int progress, String progressText) {
+        if (sseEmitter == null || objectMapper == null) return;
+        try {
+            ExecutionEvent event = ExecutionEvent.builder()
+                    .eventType("node_progress")
+                    .nodeId(nodeId)
+                    .label(label)
+                    .progress(progress)
+                    .progressText(progressText)
+                    .build();
+            sseEmitter.send(SseEmitter.event()
+                    .name("node_progress")
+                    .data(objectMapper.writeValueAsString(event)));
+        } catch (IOException e) {
+            // Ignore
+        }
     }
 }

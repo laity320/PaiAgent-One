@@ -1,4 +1,4 @@
-import { Drawer, Input, Button, Steps, Tag, Spin, Empty } from 'antd';
+import { Drawer, Input, Button, Steps, Tag, Spin, Empty, Progress } from 'antd';
 import { PlayCircleOutlined } from '@ant-design/icons';
 import { useUIStore } from '@/stores/uiStore';
 import { useDebugStore } from '@/stores/debugStore';
@@ -79,8 +79,12 @@ export default function DebugDrawer() {
         nodeId: n.id,
         nodeName: (n.data as Record<string, unknown>).label as string,
         status: 'pending',
+        inputs: null,
         output: null,
+        outputType: null,
         duration: 0,
+        progress: null,
+        progressText: null,
       });
     });
 
@@ -139,10 +143,19 @@ export default function DebugDrawer() {
               case 'node_start':
                 updateNodeResult(data.nodeId, { status: 'running' });
                 break;
+              case 'node_progress':
+                updateNodeResult(data.nodeId, {
+                  status: 'running',
+                  progress: data.progress,
+                  progressText: data.progressText,
+                });
+                break;
               case 'node_complete':
                 updateNodeResult(data.nodeId, {
                   status: 'success',
+                  inputs: data.inputs,
                   output: data.output,
+                  outputType: data.outputType,
                   duration: data.durationMs,
                 });
                 break;
@@ -227,25 +240,92 @@ export default function DebugDrawer() {
                   <Tag color={statusColor(r.status)} style={{ marginLeft: 8 }}>
                     {r.status === 'running' ? <Spin size="small" /> : r.status}
                   </Tag>
+                  {r.duration > 0 && (
+                    <span style={{ marginLeft: 8, color: '#999', fontSize: 11 }}>{r.duration}ms</span>
+                  )}
                 </span>
               ),
-              description: r.output ? (
+              description: r.status === 'success' ? (
+                <div style={{ marginTop: 4 }}>
+                  {/* 输入参数 */}
+                  {r.inputs && Object.keys(r.inputs).length > 0 && (
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>输入:</div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: '#666',
+                          maxHeight: 60,
+                          overflow: 'auto',
+                          background: '#f0f5ff',
+                          padding: 6,
+                          borderRadius: 4,
+                        }}
+                      >
+                        {Object.entries(r.inputs).map(([key, value]) => (
+                          <div key={key} style={{ marginBottom: 2 }}>
+                            <span style={{ color: '#1890ff' }}>{key}:</span>{' '}
+                            <span style={{ wordBreak: 'break-all' }}>
+                              {typeof value === 'string' && value.length > 100
+                                ? value.substring(0, 100) + '...'
+                                : String(value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* 输出参数 - TTS节点不显示输出（由输出节点统一展示） */}
+                  {r.output && r.outputType !== 'audio' && (
+                    <div>
+                      <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>输出:</div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: '#666',
+                          maxHeight: 80,
+                          overflow: 'auto',
+                          background: '#f6ffed',
+                          padding: 6,
+                          borderRadius: 4,
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {r.output.length > 300 ? r.output.substring(0, 300) + '...' : r.output}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : r.status === 'running' ? (
+                <div style={{ marginTop: 4 }}>
+                  {/* 进度条 */}
+                  {r.progress != null && (
+                    <div style={{ marginBottom: 4 }}>
+                      <Progress
+                        percent={r.progress}
+                        size="small"
+                        status="active"
+                        format={() => r.progressText || `${r.progress}%`}
+                      />
+                    </div>
+                  )}
+                  {/* 执行中文案 */}
+                  {r.progress == null && (
+                    <div style={{ fontSize: 12, color: '#1890ff' }}>执行中...</div>
+                  )}
+                </div>
+              ) : r.status === 'error' ? (
                 <div
                   style={{
                     fontSize: 12,
-                    color: '#666',
-                    maxHeight: 80,
-                    overflow: 'auto',
-                    background: '#fafafa',
+                    color: '#ff4d4f',
+                    background: '#fff2f0',
                     padding: 6,
                     borderRadius: 4,
                     marginTop: 4,
                   }}
                 >
                   {r.output}
-                  {r.duration > 0 && (
-                    <span style={{ float: 'right', color: '#bbb' }}>{r.duration}ms</span>
-                  )}
                 </div>
               ) : null,
               status:

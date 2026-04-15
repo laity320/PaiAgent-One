@@ -8,6 +8,7 @@ import com.paiagent.engine.dto.NodeResult;
 import com.paiagent.engine.executor.WorkflowExecutor;
 import com.paiagent.workflow.entity.Workflow;
 import com.paiagent.workflow.mapper.WorkflowMapper;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -47,8 +48,14 @@ public class ExecutionController {
     }
 
     @PostMapping(value = "/debug/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter debugStream(@RequestBody DebugRequest request) {
+    public SseEmitter debugStream(@RequestBody DebugRequest request, HttpServletResponse response) {
         Long userId = SecurityUtil.getCurrentUserId();
+
+        // Disable buffering for real-time SSE delivery
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("Connection", "keep-alive");
+
         SseEmitter emitter = new SseEmitter(300000L); // 5 min timeout
 
         Map<String, Object> graphJson = request.getGraphJson();

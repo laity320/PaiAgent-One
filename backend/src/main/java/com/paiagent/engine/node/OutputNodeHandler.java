@@ -8,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Slf4j
@@ -26,6 +27,7 @@ public class OutputNodeHandler extends AbstractNodeHandler {
     protected NodeResult doExecute(NodeDefinition node, ExecutionContext context) {
         String output = null;
         String resolvedOutputType = "text";
+        String audioRef = null;
         NodeResult upstreamResult = null;
 
         // Priority 1: Use the direct upstream node's output (based on graph edges)
@@ -38,7 +40,7 @@ public class OutputNodeHandler extends AbstractNodeHandler {
         // Priority 2: Try audioRef from config
         if (output == null) {
             Map<String, Object> config = variableResolver.resolveConfig(node.getConfig(), context);
-            String audioRef = (String) config.get("audioRef");
+            audioRef = (String) config.get("audioRef");
 
             if (audioRef != null && !audioRef.isEmpty()) {
                 output = context.getNodeOutput(audioRef);
@@ -85,10 +87,17 @@ public class OutputNodeHandler extends AbstractNodeHandler {
 
         log.info("输出节点最终输出 type={}, content={}", resolvedOutputType, output);
 
+        // Record inputs for display
+        Map<String, Object> inputs = new LinkedHashMap<>();
+        if (audioRef != null && !audioRef.isEmpty()) {
+            inputs.put("audioRef", audioRef);
+        }
+
         return NodeResult.builder()
                 .nodeId(node.getId())
                 .nodeName(node.getLabel())
                 .status("SUCCESS")
+                .inputs(inputs)
                 .output(output)
                 .outputType(resolvedOutputType)
                 .build();

@@ -45,6 +45,7 @@ public class WorkflowExecutor {
                 Map.of("input", input)
         );
         context.setSseEmitter(emitter);
+        context.setObjectMapper(objectMapper);
 
         try {
             Map<String, NodeResult> results = doExecute(graphJson, context);
@@ -144,7 +145,9 @@ public class WorkflowExecutor {
                             .nodeId(node.getId())
                             .nodeType(node.getType())
                             .label(node.getLabel())
+                            .inputs(result.getInputs())
                             .output(result.getOutput())
+                            .outputType(result.getOutputType())
                             .durationMs(result.getDurationMs())
                             .build());
                 } else {

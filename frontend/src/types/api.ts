@@ -26,8 +26,12 @@ export interface NodeExecutionResult {
   nodeId: string;
   nodeName: string;
   status: 'pending' | 'running' | 'success' | 'error';
+  inputs: Record<string, unknown> | null;
   output: string | null;
+  outputType: 'text' | 'audio' | null;
   duration: number;
+  progress: number | null;      // 0-100
+  progressText: string | null;  // e.g., "分片 3/10"
 }
 
 export interface DebugResponse {
