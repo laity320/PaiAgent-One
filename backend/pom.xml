@@ -134,6 +134,8 @@
                     <compilerArgs>
                         <arg>-Xlint:none</arg>
                     </compilerArgs>
+                    <fork>true</fork>
+                    <executable>C:\Program Files\Java\jdk-21\bin\javac</executable>
                 </configuration>
             </plugin>
             <plugin>

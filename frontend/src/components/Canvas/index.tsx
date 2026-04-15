@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  MarkerType,
   type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -11,6 +12,12 @@ import { nodeTypes } from '@/components/CustomNodes';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useUIStore } from '@/stores/uiStore';
 import { useDragToCanvas } from '@/hooks/useDragToCanvas';
+
+const defaultEdgeOptions = {
+  animated: true,
+  style: { stroke: '#6366f1', strokeWidth: 2 },
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1', width: 20, height: 20 },
+};
 
 export default function Canvas() {
   const { nodes, edges, onNodesChange, onEdgesChange, onConnect } = useWorkflowStore();
@@ -40,6 +47,7 @@ export default function Canvas() {
       onDragOver={onDragOver}
       onDrop={onDrop}
       nodeTypes={nodeTypes}
+      defaultEdgeOptions={defaultEdgeOptions}
       fitView
       snapToGrid
       snapGrid={[15, 15]}

@@ -49,18 +49,35 @@ public class WorkflowExecutor {
         try {
             Map<String, NodeResult> results = doExecute(graphJson, context);
 
-            // Find final output
+            // Find the OUTPUT node result as the final output
+            WorkflowGraph graph = workflowParser.parse(graphJson);
             String finalOutput = "";
             String outputType = "text";
-            for (NodeResult result : results.values()) {
-                if (result.getOutput() != null) {
-                    finalOutput = result.getOutput();
+
+            // First try to find the OUTPUT node explicitly
+            for (NodeDefinition node : graph.getAllNodes()) {
+                if ("OUTPUT".equals(node.getType())) {
+                    NodeResult outputResult = results.get(node.getId());
+                    if (outputResult != null && outputResult.getOutput() != null) {
+                        finalOutput = outputResult.getOutput();
+                        // Use the outputType set by the OutputNodeHandler directly
+                        if ("audio".equals(outputResult.getOutputType())) {
+                            outputType = "audio";
+                        }
+                    }
                 }
             }
-            // Check if the final output is an audio URL (absolute or relative)
-            if (finalOutput.matches(".*\\.(wav|mp3|ogg|aac|flac)(\\?.*)?$") ||
-                (finalOutput.contains("/audio/") && (finalOutput.startsWith("http") || finalOutput.startsWith("/")))) {
-                outputType = "audio";
+
+            // Fallback: use the last node result
+            if (finalOutput.isEmpty()) {
+                for (NodeResult result : results.values()) {
+                    if (result.getOutput() != null) {
+                        finalOutput = result.getOutput();
+                        if ("audio".equals(result.getOutputType())) {
+                            outputType = "audio";
+                        }
+                    }
+                }
             }
 
             long totalDuration = results.values().stream().mapToLong(NodeResult::getDurationMs).sum();

@@ -10,8 +10,9 @@ import java.util.Map;
 public class NodeResult {
     private String nodeId;
     private String nodeName;
-    private String status; // SUCCESS, FAILED
+    private String status;   // SUCCESS, FAILED
     private String output;
+    private String outputType; // text | audio — hints to the executor how to render
     private Map<String, Object> outputs; // Named outputs for multiple parameters
     private long durationMs;
 }

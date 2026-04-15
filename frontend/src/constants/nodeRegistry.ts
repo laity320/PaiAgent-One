@@ -109,9 +109,12 @@ export const NODE_REGISTRY: NodeRegistryItem[] = [
       toolType: 'tts',
       apiKey: '',
       model: 'qwen3-tts-flash',
-      text: { type: 'input', value: '' },
-      voice: 'Cherry',
-      languageType: 'Auto',
+      inputParams: {
+        text: { type: 'input', value: '' },
+        voice: 'Cherry',
+        languageType: 'Auto',
+      },
+      outputParam: { name: 'voice_url', type: 'string', description: '' },
       toolConfig: {
         format: 'mp3',
       },

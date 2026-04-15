@@ -27,28 +27,11 @@ public class ToolNodeHandler extends AbstractNodeHandler {
     @SuppressWarnings("unchecked")
     protected NodeResult doExecute(NodeDefinition node, ExecutionContext context) {
         Map<String, Object> config = variableResolver.resolveConfig(node.getConfig(), context);
-
         String toolType = (String) config.getOrDefault("toolType", "");
-        Map<String, Object> toolConfig = (Map<String, Object>) config.getOrDefault("toolConfig", Map.of());
-
-        // Get the upstream node's output as input text for the tool
-        String inputText = "";
-        // Find the input from upstream nodes
-        for (String upstreamId : context.getNodeResults().keySet()) {
-            var result = context.getNodeResults().get(upstreamId);
-            if (result != null && result.getOutput() != null) {
-                inputText = result.getOutput(); // Use the latest upstream output
-            }
-        }
 
         ToolHandler handler = toolHandlerRegistry.getHandler(toolType);
-        String output = handler.execute(inputText, toolConfig);
 
-        return NodeResult.builder()
-                .nodeId(node.getId())
-                .nodeName(node.getLabel())
-                .status("SUCCESS")
-                .output(output)
-                .build();
+        // Delegate full execution to the handler so it can access context directly
+        return handler.executeNode(node, context);
     }
 }

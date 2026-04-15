@@ -340,6 +340,7 @@ export default function ConfigPanel() {
             </Form.Item>
             {localConfig.toolType === 'tts' && (
               <>
+                {/* 基本信息 */}
                 <Form.Item label="API 密钥">
                   <Input.Password
                     value={localConfig.apiKey as string}
@@ -354,19 +355,40 @@ export default function ConfigPanel() {
                     placeholder="qwen3-tts-flash"
                   />
                 </Form.Item>
+                <Form.Item label="音频格式">
+                  <Select
+                    value={(localConfig.toolConfig as Record<string, unknown>)?.format as string}
+                    onChange={(v) =>
+                      updateConfig('toolConfig', {
+                        ...(localConfig.toolConfig as Record<string, unknown>),
+                        format: v,
+                      })
+                    }
+                    options={[
+                      { value: 'mp3', label: 'MP3' },
+                      { value: 'wav', label: 'WAV' },
+                    ]}
+                  />
+                </Form.Item>
+
                 <Divider style={{ margin: '12px 0' }} />
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>输入参数</div>
+
+                {/* 输入配置 */}
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>输入配置</div>
                 {/* text 参数 */}
                 <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
                   <div style={{ fontWeight: 500, marginBottom: 8 }}>text（文本内容）</div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                     <Select
-                      value={((localConfig.text as Record<string, unknown>)?.type as string) || 'input'}
+                      value={((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>)?.type as string || 'input'}
                       onChange={(v) => {
-                        updateConfig('text', {
-                          ...((localConfig.text as Record<string, unknown>) || {}),
-                          type: v,
-                          value: '',
+                        updateConfig('inputParams', {
+                          ...((localConfig.inputParams as Record<string, unknown>) || {}),
+                          text: {
+                            ...(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>) || {}),
+                            type: v,
+                            value: '',
+                          },
                         });
                       }}
                       style={{ width: 80 }}
@@ -376,14 +398,17 @@ export default function ConfigPanel() {
                       ]}
                     />
                   </div>
-                  {((localConfig.text as Record<string, unknown>)?.type as string) === 'input' ? (
+                  {(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>)?.type as string) === 'input' ? (
                     <Input.TextArea
                       placeholder="请输入要合成的文本"
-                      value={((localConfig.text as Record<string, unknown>)?.value as string) || ''}
+                      value={(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>)?.value as string) || ''}
                       onChange={(e) => {
-                        updateConfig('text', {
-                          ...((localConfig.text as Record<string, unknown>) || {}),
-                          value: e.target.value,
+                        updateConfig('inputParams', {
+                          ...((localConfig.inputParams as Record<string, unknown>) || {}),
+                          text: {
+                            ...(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>) || {}),
+                            value: e.target.value,
+                          },
                         });
                       }}
                       rows={3}
@@ -391,11 +416,14 @@ export default function ConfigPanel() {
                   ) : (
                     <Select
                       placeholder="选择引用节点"
-                      value={((localConfig.text as Record<string, unknown>)?.value as string) || undefined}
+                      value={(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>)?.value as string) || undefined}
                       onChange={(v) => {
-                        updateConfig('text', {
-                          ...((localConfig.text as Record<string, unknown>) || {}),
-                          value: v,
+                        updateConfig('inputParams', {
+                          ...((localConfig.inputParams as Record<string, unknown>) || {}),
+                          text: {
+                            ...(((localConfig.inputParams as Record<string, unknown>)?.text as Record<string, unknown>) || {}),
+                            value: v,
+                          },
                         });
                       }}
                       allowClear
@@ -414,8 +442,13 @@ export default function ConfigPanel() {
                 {/* voice 参数 */}
                 <Form.Item label="voice（音色）">
                   <Select
-                    value={localConfig.voice as string}
-                    onChange={(v) => updateConfig('voice', v)}
+                    value={((localConfig.inputParams as Record<string, unknown>)?.voice as string) || 'Cherry'}
+                    onChange={(v) =>
+                      updateConfig('inputParams', {
+                        ...((localConfig.inputParams as Record<string, unknown>) || {}),
+                        voice: v,
+                      })
+                    }
                     options={[
                       { value: 'Cherry', label: 'Cherry' },
                       { value: 'Serena', label: 'Serena' },
@@ -426,29 +459,63 @@ export default function ConfigPanel() {
                 {/* language_type 参数 */}
                 <Form.Item label="language_type（语言类型）">
                   <Select
-                    value={localConfig.languageType as string}
-                    onChange={(v) => updateConfig('languageType', v)}
+                    value={((localConfig.inputParams as Record<string, unknown>)?.languageType as string) || 'Auto'}
+                    onChange={(v) =>
+                      updateConfig('inputParams', {
+                        ...((localConfig.inputParams as Record<string, unknown>) || {}),
+                        languageType: v,
+                      })
+                    }
                     options={[
                       { value: 'Auto', label: 'Auto' },
                     ]}
                   />
                 </Form.Item>
+
                 <Divider style={{ margin: '12px 0' }} />
-                <Form.Item label="音频格式">
-                  <Select
-                    value={(localConfig.toolConfig as Record<string, unknown>)?.format as string}
-                    onChange={(v) =>
-                      updateConfig('toolConfig', {
-                        ...(localConfig.toolConfig as Record<string, unknown>),
-                        format: v,
-                      })
-                    }
-                    options={[
-                      { value: 'mp3', label: 'MP3' },
-                      { value: 'wav', label: 'WAV' },
-                    ]}
+
+                {/* 输出配置 */}
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>输出配置</div>
+                <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <Input
+                      placeholder="变量名"
+                      value={((localConfig.outputParam as Record<string, unknown>)?.name as string) || 'voice_url'}
+                      onChange={(e) => {
+                        updateConfig('outputParam', {
+                          ...((localConfig.outputParam as Record<string, unknown>) || {}),
+                          name: e.target.value,
+                          type: ((localConfig.outputParam as Record<string, unknown>)?.type as string) || 'string',
+                          description: ((localConfig.outputParam as Record<string, unknown>)?.description as string) || '',
+                        });
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <Select
+                      value={((localConfig.outputParam as Record<string, unknown>)?.type as string) || 'string'}
+                      onChange={(v) => {
+                        updateConfig('outputParam', {
+                          ...((localConfig.outputParam as Record<string, unknown>) || {}),
+                          type: v,
+                        });
+                      }}
+                      style={{ width: 100 }}
+                      options={[
+                        { value: 'string', label: 'string' },
+                      ]}
+                    />
+                  </div>
+                  <Input
+                    placeholder="描述（可选）"
+                    value={((localConfig.outputParam as Record<string, unknown>)?.description as string) || ''}
+                    onChange={(e) => {
+                      updateConfig('outputParam', {
+                        ...((localConfig.outputParam as Record<string, unknown>) || {}),
+                        description: e.target.value,
+                      });
+                    }}
                   />
-                </Form.Item>
+                </div>
               </>
             )}
           </>
@@ -467,28 +534,35 @@ export default function ConfigPanel() {
                   style={{ flex: 1 }}
                   value={localConfig.audioRef as string}
                   onChange={(v) => updateConfig('audioRef', v)}
-                  placeholder="选择引用节点"
+                  placeholder="选择引用节点的输出"
                 >
                   {nodes
                     .filter((n) => n.id !== selectedNodeId)
-                    .map((n) => (
-                      <Select.Option key={n.id} value={`${(n.data as PaiNodeData).label}.audioUrl`}>
-                        {(n.data as PaiNodeData).label}.audioUrl
-                      </Select.Option>
-                    ))}
+                    .flatMap((n) => {
+                      const nData = n.data as PaiNodeData;
+                      const items = [];
+                      // Generic .output reference
+                      items.push(
+                        <Select.Option key={`${n.id}.output`} value={`${n.id}.output`}>
+                          {nData.label}.output
+                        </Select.Option>
+                      );
+                      // If the node has an outputParam, also expose it by name
+                      const outputParam = (nData.config as Record<string, unknown>)?.outputParam as Record<string, unknown> | undefined;
+                      if (outputParam?.name && outputParam.name !== 'output') {
+                        items.push(
+                          <Select.Option key={`${n.id}.${outputParam.name}`} value={`${n.id}.${outputParam.name}`}>
+                            {nData.label}.{outputParam.name as string}
+                          </Select.Option>
+                        );
+                      }
+                      return items;
+                    })}
                 </Select>
               </div>
             </Form.Item>
-            <Form.Item label="回答内容配置">
-              <Input.TextArea
-                value={localConfig.outputTemplate as string}
-                onChange={(e) => updateConfig('outputTemplate', e.target.value)}
-                rows={4}
-                placeholder="{{output}}"
-              />
-            </Form.Item>
-            <div style={{ fontSize: 12, color: '#faad14', marginBottom: 12 }}>
-              提示: 使用 {'{{参数名}}'} 引用上面定义的参数
+            <div style={{ fontSize: 12, color: '#999', marginTop: -8, marginBottom: 12 }}>
+              选择上游节点的输出作为最终输出（如 TTS 节点的 voice_url）
             </div>
           </>
         );

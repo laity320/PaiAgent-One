@@ -1,15 +1,19 @@
 package com.paiagent.tool.handler;
 
-import com.paiagent.tool.service.FileStorageService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.paiagent.engine.context.ExecutionContext;
+import com.paiagent.engine.dto.NodeResult;
+import com.paiagent.engine.model.NodeDefinition;
+import com.paiagent.engine.parser.VariableResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Slf4j
@@ -17,7 +21,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class TtsToolHandler implements ToolHandler {
 
-    private final FileStorageService fileStorageService;
+    private static final String DASHSCOPE_TTS_URL =
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+
+    private final ObjectMapper objectMapper;
+    private final VariableResolver variableResolver;
 
     @Override
     public String getToolType() {
@@ -26,72 +34,126 @@ public class TtsToolHandler implements ToolHandler {
 
     @Override
     public String execute(String input, Map<String, Object> config) {
-        String voice = (String) config.getOrDefault("voice", "xiaoyun");
-
-        log.info("TTS 合成请求: voice={}, text length={}", voice, input.length());
-
-        // Mock TTS: In production, call actual TTS API (Aliyun/XunFei/etc.)
-        // Generate a valid WAV audio file (short tone) so the audio player works
-        try {
-            String filename = "tts-" + System.currentTimeMillis() + ".wav";
-            byte[] wavBytes = generateMockWav(2);
-
-            String audioUrl = fileStorageService.store(filename, new ByteArrayInputStream(wavBytes));
-            log.info("TTS 音频已生成 (Mock WAV): {}", audioUrl);
-            return audioUrl;
-        } catch (Exception e) {
-            log.error("TTS 合成失败", e);
-            return "[TTS Error] 音频合成失败: " + e.getMessage();
-        }
+        // Legacy path — full execution now handled via executeNode
+        return callDashScopeTts(input, "Cherry", "Auto",
+                (String) config.getOrDefault("apiKey", ""),
+                (String) config.getOrDefault("model", "qwen3-tts-flash"));
     }
 
-    /**
-     * Generate a valid WAV audio file with a simple sine wave tone.
-     */
-    private byte[] generateMockWav(int durationSeconds) throws IOException {
-        int sampleRate = 16000;
-        int bitsPerSample = 16;
-        int channels = 1;
-        int numSamples = sampleRate * durationSeconds;
-        int dataSize = numSamples * channels * (bitsPerSample / 8);
+    @Override
+    public NodeResult executeNode(NodeDefinition node, ExecutionContext context) {
+        Map<String, Object> config = variableResolver.resolveConfig(node.getConfig(), context);
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ByteBuffer bb = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN);
+        String apiKey = (String) config.getOrDefault("apiKey", "");
+        String model = (String) config.getOrDefault("model", "qwen3-tts-flash");
 
-        // RIFF header
-        bb.put("RIFF".getBytes());
-        bb.putInt(36 + dataSize);
-        bb.put("WAVE".getBytes());
+        // --- Resolve inputParams ---
+        String text = "";
+        String voice = "Cherry";
+        String languageType = "Auto";
 
-        // fmt chunk
-        bb.put("fmt ".getBytes());
-        bb.putInt(16);                    // chunk size
-        bb.putShort((short) 1);           // PCM format
-        bb.putShort((short) channels);
-        bb.putInt(sampleRate);
-        bb.putInt(sampleRate * channels * bitsPerSample / 8);  // byte rate
-        bb.putShort((short) (channels * bitsPerSample / 8));   // block align
-        bb.putShort((short) bitsPerSample);
+        Object inputParamsObj = config.get("inputParams");
+        if (inputParamsObj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> inputParams = (Map<String, Object>) inputParamsObj;
 
-        // data chunk
-        bb.put("data".getBytes());
-        bb.putInt(dataSize);
+            // Resolve text (supports input or ref)
+            Object textObj = inputParams.get("text");
+            if (textObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> textParam = (Map<String, Object>) textObj;
+                String type = (String) textParam.getOrDefault("type", "input");
+                String value = (String) textParam.getOrDefault("value", "");
 
-        // Generate a 440Hz sine wave (A4 note)
-        double frequency = 440.0;
-        for (int i = 0; i < numSamples; i++) {
-            double t = (double) i / sampleRate;
-            // Fade in/out to avoid clicks
-            double envelope = 1.0;
-            if (i < sampleRate / 10) {
-                envelope = (double) i / (sampleRate / 10);
-            } else if (i > numSamples - sampleRate / 10) {
-                envelope = (double) (numSamples - i) / (sampleRate / 10);
+                if ("ref".equals(type) && value != null && !value.isEmpty()) {
+                    // Resolve reference: value is like "nodeId.output"
+                    String refNodeId = value.replace(".output", "");
+                    String resolved = context.getNodeOutput(refNodeId);
+                    if (resolved == null) {
+                        resolved = context.getNodeOutputByLabel(refNodeId);
+                    }
+                    text = resolved != null ? resolved : "";
+                } else {
+                    text = value != null ? value : "";
+                }
+            } else if (textObj instanceof String) {
+                text = (String) textObj;
             }
-            short sample = (short) (Short.MAX_VALUE * 0.3 * envelope * Math.sin(2.0 * Math.PI * frequency * t));
-            bb.putShort(sample);
+
+            voice = (String) inputParams.getOrDefault("voice", "Cherry");
+            languageType = (String) inputParams.getOrDefault("languageType", "Auto");
         }
 
-        return bb.array();
+        // --- Get output param name ---
+        String outputParamName = "voice_url";
+        Object outputParamObj = config.get("outputParam");
+        if (outputParamObj instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> outputParam = (Map<String, Object>) outputParamObj;
+            outputParamName = (String) outputParam.getOrDefault("name", "voice_url");
+        }
+
+        log.info("TTS 合成: model={}, voice={}, languageType={}, text length={}", model, voice, languageType, text.length());
+
+        String audioUrl = callDashScopeTts(text, voice, languageType, apiKey, model);
+
+        Map<String, Object> outputs = new LinkedHashMap<>();
+        outputs.put(outputParamName, audioUrl);
+
+        return NodeResult.builder()
+                .nodeId(node.getId())
+                .nodeName(node.getLabel())
+                .status("SUCCESS")
+                .output(audioUrl)
+                .outputType("audio")
+                .outputs(outputs)
+                .build();
+    }
+
+    private String callDashScopeTts(String text, String voice, String languageType, String apiKey, String model) {
+        if (apiKey == null || apiKey.isEmpty()) {
+            log.warn("TTS API Key 未配置，返回 Mock URL");
+            return "https://mock-tts.example.com/audio-" + System.currentTimeMillis() + ".mp3";
+        }
+
+        try {
+            RestTemplate restTemplate = new RestTemplate();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.setBearerAuth(apiKey);
+
+            // Build request body per DashScope TTS API spec
+            Map<String, Object> input = new HashMap<>();
+            input.put("text", text);
+            input.put("voice", voice);
+            if (languageType != null && !languageType.isEmpty()) {
+                input.put("language_type", languageType);
+            }
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("model", model);
+            body.put("input", input);
+
+            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+            ResponseEntity<String> response = restTemplate.exchange(
+                    DASHSCOPE_TTS_URL, HttpMethod.POST, entity, String.class);
+
+            // Parse response: output.audio.url
+            JsonNode root = objectMapper.readTree(response.getBody());
+            String audioUrl = root.path("output").path("audio").path("url").asText();
+
+            if (audioUrl == null || audioUrl.isEmpty()) {
+                log.error("TTS 响应中未找到 audio URL，响应体: {}", response.getBody());
+                throw new RuntimeException("TTS 响应中未找到 audio URL");
+            }
+
+            log.info("TTS 合成成功，audio URL: {}", audioUrl);
+            return audioUrl;
+
+        } catch (Exception e) {
+            log.error("TTS API 调用失败: {}", e.getMessage(), e);
+            throw new RuntimeException("TTS 合成失败: " + e.getMessage(), e);
+        }
     }
 }

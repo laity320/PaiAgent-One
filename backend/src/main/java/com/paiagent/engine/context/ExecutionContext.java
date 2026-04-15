@@ -40,6 +40,14 @@ public class ExecutionContext {
         if (result.getOutput() != null) {
             nodeOutputs.put(nodeId, result.getOutput());
         }
+        // Also register named outputs (e.g. voice_url, output) as nodeId__paramName
+        if (result.getOutputs() != null) {
+            result.getOutputs().forEach((paramName, value) -> {
+                if (value != null) {
+                    nodeOutputs.put(nodeId + "." + paramName, value.toString());
+                }
+            });
+        }
     }
 
     public String getNodeOutput(String nodeId) {
