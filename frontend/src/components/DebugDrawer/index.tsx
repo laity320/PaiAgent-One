@@ -5,6 +5,48 @@ import { useDebugStore } from '@/stores/debugStore';
 import { useWorkflowStore } from '@/stores/workflowStore';
 import { useAuthStore } from '@/stores/authStore';
 import AudioPlayer from '@/components/common/AudioPlayer';
+import type { Node, Edge } from '@xyflow/react';
+
+/** 按边的连接关系拓扑排序，返回排序后的节点列表 */
+function topoSort(nodes: Node[], edges: Edge[]): Node[] {
+  const inDegree = new Map<string, number>();
+  const adjList = new Map<string, string[]>();
+
+  nodes.forEach((n) => {
+    inDegree.set(n.id, 0);
+    adjList.set(n.id, []);
+  });
+
+  edges.forEach((e) => {
+    if (e.source && e.target) {
+      adjList.get(e.source)?.push(e.target);
+      inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+    }
+  });
+
+  const queue = nodes.filter((n) => (inDegree.get(n.id) ?? 0) === 0);
+  const result: Node[] = [];
+
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    result.push(node);
+    for (const nextId of adjList.get(node.id) ?? []) {
+      const deg = (inDegree.get(nextId) ?? 1) - 1;
+      inDegree.set(nextId, deg);
+      if (deg === 0) {
+        const nextNode = nodes.find((n) => n.id === nextId);
+        if (nextNode) queue.push(nextNode);
+      }
+    }
+  }
+
+  // Append any nodes not reached (disconnected)
+  nodes.forEach((n) => {
+    if (!result.find((r) => r.id === n.id)) result.push(n);
+  });
+
+  return result;
+}
 
 export default function DebugDrawer() {
   const { isDebugDrawerOpen, setDebugDrawerOpen } = useUIStore();
@@ -30,8 +72,9 @@ export default function DebugDrawer() {
     reset();
     setRunning(true);
 
-    // Initialize all nodes as pending
-    nodes.forEach((n) => {
+    // Initialize all nodes as pending, sorted by execution order
+    const sortedNodes = topoSort(nodes, edges);
+    sortedNodes.forEach((n) => {
       addNodeResult({
         nodeId: n.id,
         nodeName: (n.data as Record<string, unknown>).label as string,

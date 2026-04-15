@@ -107,6 +107,7 @@ public class WorkflowExecutor {
 
     private Map<String, NodeResult> doExecute(Map<String, Object> graphJson, ExecutionContext context) {
         WorkflowGraph graph = workflowParser.parse(graphJson);
+        context.setGraph(graph);
 
         // Register labels for variable resolution
         for (NodeDefinition node : graph.getAllNodes()) {

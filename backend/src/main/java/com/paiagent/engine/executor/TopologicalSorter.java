@@ -3,14 +3,24 @@ package com.paiagent.engine.executor;
 import com.paiagent.common.exception.WorkflowExecutionException;
 import com.paiagent.engine.model.NodeDefinition;
 import com.paiagent.engine.model.WorkflowGraph;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Component
 public class TopologicalSorter {
 
     public List<NodeDefinition> sort(WorkflowGraph graph) {
+        log.info("=== 拓扑排序开始 ===");
+        log.info("节点列表: {}", graph.getAllNodes().stream()
+                .map(n -> n.getId() + "(" + n.getType() + ":" + n.getLabel() + ")")
+                .collect(Collectors.joining(", ")));
+        log.info("边列表: {}", graph.getEdges().stream()
+                .map(e -> e.getSource() + " → " + e.getTarget())
+                .collect(Collectors.joining(", ")));
         Map<String, Integer> inDegree = new HashMap<>();
         for (NodeDefinition node : graph.getAllNodes()) {
             inDegree.put(node.getId(), 0);
@@ -48,6 +58,9 @@ public class TopologicalSorter {
             throw new WorkflowExecutionException("工作流中存在循环依赖");
         }
 
+        log.info("拓扑排序结果: {}", sorted.stream()
+                .map(n -> n.getId() + "(" + n.getType() + ":" + n.getLabel() + ")")
+                .collect(Collectors.joining(" → ")));
         return sorted;
     }
 }

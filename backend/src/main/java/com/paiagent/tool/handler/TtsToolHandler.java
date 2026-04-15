@@ -47,6 +47,8 @@ public class TtsToolHandler implements ToolHandler {
         String apiKey = (String) config.getOrDefault("apiKey", "");
         String model = (String) config.getOrDefault("model", "qwen3-tts-flash");
 
+        log.info("TTS 节点配置 apiKey 长度={}, model={}", apiKey == null ? 0 : apiKey.length(), model);
+
         // --- Resolve inputParams ---
         String text = "";
         String voice = "Cherry";
@@ -66,12 +68,16 @@ public class TtsToolHandler implements ToolHandler {
                 String value = (String) textParam.getOrDefault("value", "");
 
                 if ("ref".equals(type) && value != null && !value.isEmpty()) {
-                    // Resolve reference: value is like "nodeId.output"
-                    String refNodeId = value.replace(".output", "");
+                    // value is like "nodeId.output" — strip the ".output" suffix to get nodeId
+                    String refNodeId = value.contains(".")
+                            ? value.substring(0, value.lastIndexOf('.'))
+                            : value;
                     String resolved = context.getNodeOutput(refNodeId);
                     if (resolved == null) {
                         resolved = context.getNodeOutputByLabel(refNodeId);
                     }
+                    log.info("TTS ref 解析: value={}, refNodeId={}, resolved length={}",
+                            value, refNodeId, resolved != null ? resolved.length() : 0);
                     text = resolved != null ? resolved : "";
                 } else {
                     text = value != null ? value : "";
@@ -84,6 +90,16 @@ public class TtsToolHandler implements ToolHandler {
             languageType = (String) inputParams.getOrDefault("languageType", "Auto");
         }
 
+        // If text is empty or same as raw user input, try using direct upstream node's output
+        // This ensures data flows along edges (e.g., LLM output → TTS input)
+        if (text.isEmpty() || text.equals(context.getFirstInput())) {
+            String upstreamOutput = context.getDirectUpstreamOutput(node.getId());
+            if (upstreamOutput != null && !upstreamOutput.isEmpty()) {
+                log.info("TTS 使用直接上游节点输出作为合成文本 (长度={})", upstreamOutput.length());
+                text = upstreamOutput;
+            }
+        }
+
         // --- Get output param name ---
         String outputParamName = "voice_url";
         Object outputParamObj = config.get("outputParam");
@@ -94,6 +110,10 @@ public class TtsToolHandler implements ToolHandler {
         }
 
         log.info("TTS 合成: model={}, voice={}, languageType={}, text length={}", model, voice, languageType, text.length());
+
+        if (text.isEmpty()) {
+            throw new RuntimeException("TTS 合成失败: 输入文本为空，请检查上游节点（LLM）是否有输出，以及 TTS 节点的 text 参数是否正确配置为引用");
+        }
 
         String audioUrl = callDashScopeTts(text, voice, languageType, apiKey, model);
 

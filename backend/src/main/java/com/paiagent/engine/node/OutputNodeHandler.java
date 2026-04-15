@@ -24,40 +24,48 @@ public class OutputNodeHandler extends AbstractNodeHandler {
 
     @Override
     protected NodeResult doExecute(NodeDefinition node, ExecutionContext context) {
-        Map<String, Object> config = variableResolver.resolveConfig(node.getConfig(), context);
-
-        // audioRef is like "nodeId.voice_url" or "nodeId.output"
-        String audioRef = (String) config.get("audioRef");
         String output = null;
         String resolvedOutputType = "text";
-
         NodeResult upstreamResult = null;
 
-        if (audioRef != null && !audioRef.isEmpty()) {
-            // Try direct context lookup: "nodeId.paramName" stored in context
-            output = context.getNodeOutput(audioRef);
+        // Priority 1: Use the direct upstream node's output (based on graph edges)
+        upstreamResult = context.getDirectUpstreamResult(node.getId());
+        if (upstreamResult != null && upstreamResult.getOutput() != null) {
+            output = upstreamResult.getOutput();
+            log.info("输出节点使用直接上游节点输出: nodeId={}", upstreamResult.getNodeId());
+        }
 
-            // Parse nodeId and paramName from the ref
-            String nodeId = audioRef.contains(".") ? audioRef.substring(0, audioRef.lastIndexOf('.')) : audioRef;
-            String paramName = audioRef.contains(".") ? audioRef.substring(audioRef.lastIndexOf('.') + 1) : "output";
+        // Priority 2: Try audioRef from config
+        if (output == null) {
+            Map<String, Object> config = variableResolver.resolveConfig(node.getConfig(), context);
+            String audioRef = (String) config.get("audioRef");
 
-            upstreamResult = context.getNodeResults().get(nodeId);
+            if (audioRef != null && !audioRef.isEmpty()) {
+                output = context.getNodeOutput(audioRef);
 
-            if (output == null && upstreamResult != null) {
-                if ("output".equals(paramName)) {
-                    output = upstreamResult.getOutput();
-                } else if (upstreamResult.getOutputs() != null) {
-                    Object val = upstreamResult.getOutputs().get(paramName);
-                    output = val != null ? val.toString() : null;
+                String refNodeId = audioRef.contains(".") ? audioRef.substring(0, audioRef.lastIndexOf('.')) : audioRef;
+                String paramName = audioRef.contains(".") ? audioRef.substring(audioRef.lastIndexOf('.') + 1) : "output";
+
+                upstreamResult = context.getNodeResults().get(refNodeId);
+
+                if (output == null && upstreamResult != null) {
+                    if ("output".equals(paramName)) {
+                        output = upstreamResult.getOutput();
+                    } else if (upstreamResult.getOutputs() != null) {
+                        Object val = upstreamResult.getOutputs().get(paramName);
+                        output = val != null ? val.toString() : null;
+                    }
                 }
-            }
 
-            if (output == null) {
-                log.warn("输出节点未能解析 audioRef: {}", audioRef);
+                if (output != null) {
+                    log.info("输出节点使用 audioRef 输出: {}", audioRef);
+                } else {
+                    log.warn("输出节点未能解析 audioRef: {}", audioRef);
+                }
             }
         }
 
-        // Fallback: use the last upstream node's output
+        // Priority 3: Fallback — use the last node result
         if (output == null) {
             for (Map.Entry<String, NodeResult> entry : context.getNodeResults().entrySet()) {
                 if (!entry.getKey().equals(node.getId()) && entry.getValue().getOutput() != null) {
