@@ -38,6 +38,22 @@ public class OpenAiAdapter implements LlmAdapter {
     protected String getBaseUrl() { return baseUrl; }
     protected String getApiKey() { return apiKey; }
 
+    // Get effective URL - use request override or default
+    protected String getEffectiveUrl(ChatRequest request) {
+        if (request.getApiUrl() != null && !request.getApiUrl().isEmpty()) {
+            return request.getApiUrl();
+        }
+        return getBaseUrl();
+    }
+
+    // Get effective API key - use request override or default
+    protected String getEffectiveApiKey(ChatRequest request) {
+        if (request.getApiKey() != null && !request.getApiKey().isEmpty()) {
+            return request.getApiKey();
+        }
+        return getApiKey();
+    }
+
     @Override
     public String getProvider() {
         return "openai";
@@ -45,11 +61,22 @@ public class OpenAiAdapter implements LlmAdapter {
 
     @Override
     public ChatResponse chat(ChatRequest request) {
-        String url = getBaseUrl() + "/v1/chat/completions";
+        String effectiveUrl = getEffectiveUrl(request);
+        String effectiveApiKey = getEffectiveApiKey(request);
+
+        // Check if URL already contains the full endpoint path
+        String url;
+        if (effectiveUrl.contains("/chat/completions")) {
+            url = effectiveUrl;
+        } else if (effectiveUrl.endsWith("/v1") || effectiveUrl.endsWith("/v1/")) {
+            url = effectiveUrl.replaceAll("/v1/?$", "") + "/v1/chat/completions";
+        } else {
+            url = effectiveUrl + "/v1/chat/completions";
+        }
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(getApiKey());
+        headers.setBearerAuth(effectiveApiKey);
 
         Map<String, Object> body = new HashMap<>();
         body.put("model", request.getModel());

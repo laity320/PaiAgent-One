@@ -11,4 +11,8 @@ public class ChatRequest {
     private List<ChatMessage> messages;
     private double temperature;
     private int maxTokens;
+
+    // Dynamic API configuration (overrides default adapter config)
+    private String apiUrl;
+    private String apiKey;
 }

@@ -36,7 +36,7 @@ export default function EditorLayout({
         {showConfigPanel && (
           <div
             style={{
-              width: 320,
+              width: 420,
               background: '#fff',
               borderLeft: '1px solid #e5e7eb',
               overflowY: 'auto',

@@ -2,6 +2,18 @@ export type NodeCategory = 'input' | 'llm' | 'tool' | 'output';
 
 export type LLMProvider = 'deepseek' | 'tongyi' | 'aiping' | 'zhipu' | 'openai';
 
+export interface InputParam {
+  name: string;
+  type: 'input' | 'ref';
+  value: string;
+}
+
+export interface OutputParam {
+  name: string;
+  type: string;
+  description: string;
+}
+
 export interface PaiNodeData extends Record<string, unknown> {
   label: string;
   category: NodeCategory;
@@ -24,9 +36,14 @@ export interface LLMNodeData extends PaiNodeData {
     provider: LLMProvider;
     model: string;
     temperature: number;
-    maxTokens: number;
-    systemPrompt: string;
-    userPromptTemplate: string;
+    maxTokens?: number;
+    systemPrompt?: string;
+    userPromptTemplate?: string;
+    apiUrl?: string;
+    apiKey?: string;
+    inputParams?: InputParam[];
+    outputParam?: OutputParam;
+    userPrompt?: string;
   };
 }
 
