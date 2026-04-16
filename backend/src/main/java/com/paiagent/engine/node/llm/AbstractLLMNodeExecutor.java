@@ -5,14 +5,18 @@ import com.paiagent.engine.dto.NodeResult;
 import com.paiagent.engine.model.NodeDefinition;
 import com.paiagent.engine.node.AbstractNodeHandler;
 import com.paiagent.engine.parser.VariableResolver;
-import com.paiagent.llm.client.DynamicChatClient;
 import com.paiagent.llm.dto.ChatResponse;
 import com.paiagent.llm.factory.ChatClientFactory;
 import com.paiagent.skill.injector.SkillInjector;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -120,9 +124,19 @@ public abstract class AbstractLLMNodeExecutor extends AbstractNodeHandler {
             outputParamName = (String) op.getOrDefault("name", "output");
         }
 
-        // 动态创建 ChatClient 并调用
-        DynamicChatClient client = chatClientFactory.create(provider, model, apiUrl, apiKey, temperature, maxTokens);
-        ChatResponse response = client.chat(systemPrompt, resolvedUserPrompt);
+        // 动态创建 Spring AI ChatModel 并调用
+        ChatModel chatModel = chatClientFactory.create(provider, model, apiUrl, apiKey, temperature, maxTokens);
+
+        // 构建消息列表
+        List<Message> messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            messages.add(new SystemMessage(systemPrompt));
+        }
+        messages.add(new UserMessage(resolvedUserPrompt));
+
+        org.springframework.ai.chat.model.ChatResponse aiResponse = chatModel.call(new Prompt(messages));
+
+        ChatResponse response = ChatResponse.fromSpringAi(aiResponse);
 
         // 子类后处理响应
         String content = postProcessResponse(response.getContent(), config);

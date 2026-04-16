@@ -44,6 +44,19 @@ paiagent:
   llm:
     http-connect-timeout-ms: 5000
     http-read-timeout-ms: 120000
+    providers:
+      openai:
+        base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+        api-key: ${OPENAI_API_KEY:}
+      deepseek:
+        base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        api-key: ${DEEPSEEK_API_KEY:}
+      tongyi:
+        base-url: ${QWEN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+        api-key: ${QWEN_API_KEY:}
+      zhipu:
+        base-url: ${ZHIPU_BASE_URL:https://open.bigmodel.cn/api/paas}
+        api-key: ${ZHIPU_API_KEY:}
 
 logging:
   level:

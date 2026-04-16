@@ -4,32 +4,32 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paiagent.engine.context.ExecutionContext;
 import com.paiagent.engine.dto.ExecutionEvent;
 import com.paiagent.engine.dto.NodeResult;
-import com.paiagent.engine.graph.GraphBuilder;
-import com.paiagent.engine.graph.NodeAdapter;
-import com.paiagent.engine.graph.StateGraph;
-import com.paiagent.engine.graph.WorkflowState;
+import com.paiagent.engine.graph.LangGraphWorkflowCompiler;
+import com.paiagent.engine.graph.WorkflowAgentState;
 import com.paiagent.engine.model.NodeDefinition;
 import com.paiagent.engine.model.WorkflowGraph;
 import com.paiagent.engine.node.NodeHandlerRegistry;
 import com.paiagent.engine.parser.WorkflowParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bsc.langgraph4j.CompiledGraph;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * WorkflowExecutor —— 基于 LangGraph4j 风格的 StateGraph 驱动工作流执行。
+ * WorkflowExecutor —— 基于 LangGraph4j CompiledGraph 驱动工作流执行。
  *
  * <p>执行流程：
  * <ol>
  *   <li>解析 graphJson → WorkflowGraph</li>
- *   <li>GraphBuilder 注册节点 + 拓扑排序 → StateGraph（编译阶段）</li>
- *   <li>StateGraph#execute() 按顺序驱动各 NodeAdapter，状态写入 WorkflowState</li>
- *   <li>每个节点执行前后通过 SSE 推送进度事件</li>
+ *   <li>LangGraphWorkflowCompiler 编译 → CompiledGraph（注册节点 + 边 + START/END）</li>
+ *   <li>CompiledGraph.invoke() 按图结构驱动各节点执行，状态写入 ExecutionContext</li>
+ *   <li>每个节点执行前后通过 SSE 推送进度事件（在 node action 内部完成）</li>
  * </ol>
  */
 @Slf4j
@@ -38,7 +38,7 @@ import java.util.Map;
 public class WorkflowExecutor {
 
     private final WorkflowParser workflowParser;
-    private final TopologicalSorter topologicalSorter;
+    private final LangGraphWorkflowCompiler graphCompiler;
     private final NodeHandlerRegistry nodeHandlerRegistry;
     private final ObjectMapper objectMapper;
 
@@ -49,8 +49,8 @@ public class WorkflowExecutor {
     public Map<String, NodeResult> execute(Map<String, Object> graphJson, String input, Long userId) {
         String execId = "exec-" + System.currentTimeMillis();
         ExecutionContext context = new ExecutionContext(execId, userId, Map.of("input", input));
-        WorkflowState state = new WorkflowState(execId, input);
-        return doExecute(graphJson, context, state);
+        context.setObjectMapper(objectMapper);
+        return doExecute(graphJson, context);
     }
 
     public void executeWithSSE(Map<String, Object> graphJson, String input, Long userId, SseEmitter emitter) {
@@ -59,13 +59,11 @@ public class WorkflowExecutor {
         context.setSseEmitter(emitter);
         context.setObjectMapper(objectMapper);
 
-        WorkflowState state = new WorkflowState(execId, input);
-
         try {
-            Map<String, NodeResult> results = doExecuteWithSSE(graphJson, context, state, emitter);
+            Map<String, NodeResult> results = doExecute(graphJson, context);
 
-            // 优先取 OUTPUT 节点结果
-            WorkflowGraph graph = workflowParser.parse(graphJson);
+            // 提取最终输出（优先取 OUTPUT 节点）
+            WorkflowGraph graph = context.getGraph();
             String finalOutput = "";
             String outputType = "text";
 
@@ -94,7 +92,8 @@ public class WorkflowExecutor {
             }
 
             long totalDuration = results.values().stream().mapToLong(NodeResult::getDurationMs).sum();
-            String status = state.isAborted() ? "FAILED" : "SUCCESS";
+            boolean aborted = results.values().stream().anyMatch(r -> "FAILED".equals(r.getStatus()));
+            String status = aborted ? "FAILED" : "SUCCESS";
 
             sendSSEEvent(emitter, "execution_complete", ExecutionEvent.builder()
                     .eventType("execution_complete")
@@ -120,12 +119,11 @@ public class WorkflowExecutor {
     }
 
     // -----------------------------------------------------------------------
-    // 内部执行（无 SSE）
+    // 内部执行
     // -----------------------------------------------------------------------
 
     private Map<String, NodeResult> doExecute(Map<String, Object> graphJson,
-                                               ExecutionContext context,
-                                               WorkflowState state) {
+                                               ExecutionContext context) {
         WorkflowGraph graph = workflowParser.parse(graphJson);
         context.setGraph(graph);
 
@@ -133,73 +131,24 @@ public class WorkflowExecutor {
             context.registerNodeLabel(node.getId(), node.getLabel());
         }
 
-        // 构建 StateGraph（GraphBuilder 注册节点 + 拓扑排序）
-        StateGraph stateGraph = GraphBuilder.from(graph, nodeHandlerRegistry, topologicalSorter).build();
-        stateGraph.execute(state, context);
+        // 使用 LangGraph4j 编译并执行
+        CompiledGraph<WorkflowAgentState> compiled = graphCompiler.compile(graph, context);
 
-        return new LinkedHashMap<>(state.getNodeResults());
-    }
+        Map<String, Object> initState = new LinkedHashMap<>();
+        initState.put("executionId", context.getExecutionId());
+        initState.put("userInput", context.getFirstInput());
+        initState.put("aborted", false);
 
-    // -----------------------------------------------------------------------
-    // 内部执行（有 SSE）：手动遍历以在每节点前后推送事件
-    // -----------------------------------------------------------------------
-
-    private Map<String, NodeResult> doExecuteWithSSE(Map<String, Object> graphJson,
-                                                      ExecutionContext context,
-                                                      WorkflowState state,
-                                                      SseEmitter emitter) {
-        WorkflowGraph graph = workflowParser.parse(graphJson);
-        context.setGraph(graph);
-
-        for (NodeDefinition node : graph.getAllNodes()) {
-            context.registerNodeLabel(node.getId(), node.getLabel());
+        try {
+            Optional<WorkflowAgentState> result = compiled.invoke(initState);
+            log.info("LangGraph4j 执行完成, aborted={}", 
+                    result.map(WorkflowAgentState::isAborted).orElse(false));
+        } catch (Exception e) {
+            log.error("LangGraph4j 执行异常: {}", e.getMessage(), e);
+            throw new RuntimeException("工作流执行失败: " + e.getMessage(), e);
         }
 
-        // 编译 StateGraph
-        StateGraph stateGraph = GraphBuilder.from(graph, nodeHandlerRegistry, topologicalSorter).build();
-
-        for (NodeAdapter adapter : stateGraph.getExecutionOrder()) {
-            if (state.isAborted()) break;
-
-            NodeDefinition node = graph.getNode(adapter.getNodeId());
-
-            // node_start
-            sendSSEEvent(emitter, "node_start", ExecutionEvent.builder()
-                    .eventType("node_start")
-                    .nodeId(node.getId())
-                    .nodeType(node.getType())
-                    .label(node.getLabel())
-                    .build());
-
-            // 执行：NodeAdapter 内部调用 handler 并写入 state
-            NodeResult result = adapter.execute(state, context);
-            context.putNodeResult(node.getId(), result);
-
-            // node_complete / node_error
-            if ("SUCCESS".equals(result.getStatus())) {
-                sendSSEEvent(emitter, "node_complete", ExecutionEvent.builder()
-                        .eventType("node_complete")
-                        .nodeId(node.getId())
-                        .nodeType(node.getType())
-                        .label(node.getLabel())
-                        .inputs(result.getInputs())
-                        .output(result.getOutput())
-                        .outputType(result.getOutputType())
-                        .durationMs(result.getDurationMs())
-                        .build());
-            } else {
-                sendSSEEvent(emitter, "node_error", ExecutionEvent.builder()
-                        .eventType("node_error")
-                        .nodeId(node.getId())
-                        .label(node.getLabel())
-                        .error(result.getOutput())
-                        .build());
-                state.abort("节点 " + node.getId() + " 执行失败");
-                break;
-            }
-        }
-
-        return new LinkedHashMap<>(state.getNodeResults());
+        return new LinkedHashMap<>(context.getNodeResults());
     }
 
     // -----------------------------------------------------------------------
