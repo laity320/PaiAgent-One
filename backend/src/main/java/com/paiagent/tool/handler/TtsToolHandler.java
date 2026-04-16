@@ -18,6 +18,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -29,6 +30,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Component
@@ -38,7 +41,13 @@ public class TtsToolHandler implements ToolHandler {
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 
     private static final int MAX_CONCURRENT_REQUESTS = 2; // 限制并发数，避免触发限流
-    private static final int SEGMENT_MAX_LENGTH = 300; // 每段最大字数
+
+    /** 每段最大字节数（UTF-8: 中文 3 字节/字符，英文 1 字节/字符，900 字节约等于 300 中文字符） */
+    private static final int SEGMENT_MAX_BYTES = 900;
+
+    /** 标点断句优先级：优先在以下标点处分段 */
+    private static final Pattern SENTENCE_BREAK_PATTERN =
+            Pattern.compile("([。！？!?\\.]+|[,，、;；：:]+|\\s+)");
 
     private final ObjectMapper objectMapper;
     private final VariableResolver variableResolver;
@@ -401,37 +410,58 @@ public class TtsToolHandler implements ToolHandler {
     }
 
     /**
-     * 按句子分割文本
+     * UTF-8 字节级智能分段。
+     *
+     * <p>分段策略：
+     * <ol>
+     *   <li>优先按句末标点（。！？!?）分段</li>
+     *   <li>若单句超长，按次级标点（，、;：）分段</li>
+     *   <li>若仍超长，按 UTF-8 字节边界截断（确保不截断多字节字符）</li>
+     * </ol>
      */
     private List<String> splitText(String text) {
         List<String> segments = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return segments;
+        }
 
-        // 按句号、问号、感叹号分割
-        String[] sentences = text.split("(?<=[。！？!?\\.])");
+        // 1. 按句末标点分段
+        List<String> sentences = splitByPunctuation(text, "[。！？!?\\.]+");
+        log.debug("TTS 按句末标点分段: {} 段", sentences.size());
 
         StringBuilder currentSegment = new StringBuilder();
+        int currentBytes = 0;
+
         for (String sentence : sentences) {
             sentence = sentence.trim();
             if (sentence.isEmpty()) continue;
 
-            if (currentSegment.length() + sentence.length() > SEGMENT_MAX_LENGTH && currentSegment.length() > 0) {
-                segments.add(currentSegment.toString().trim());
-                currentSegment = new StringBuilder();
+            int sentenceBytes = getUtf8ByteLength(sentence);
+
+            // 如果当前段 + 新句子不超过限制，直接追加
+            if (currentBytes + sentenceBytes <= SEGMENT_MAX_BYTES || currentSegment.length() == 0) {
+                currentSegment.append(sentence);
+                currentBytes += sentenceBytes;
+            } else {
+                // 当前段已满，先保存
+                if (currentSegment.length() > 0) {
+                    segments.add(currentSegment.toString().trim());
+                }
+                // 检查新句子是否超限
+                if (sentenceBytes > SEGMENT_MAX_BYTES) {
+                    // 超长句子需要进一步分割
+                    segments.addAll(splitLongSentence(sentence));
+                    currentSegment = new StringBuilder();
+                    currentBytes = 0;
+                } else {
+                    currentSegment = new StringBuilder(sentence);
+                    currentBytes = sentenceBytes;
+                }
             }
-            currentSegment.append(sentence);
         }
 
         if (currentSegment.length() > 0) {
             segments.add(currentSegment.toString().trim());
-        }
-
-        // 如果没有分割出多段，且文本较长，按固定长度分割
-        if (segments.size() <= 1 && text.length() > SEGMENT_MAX_LENGTH) {
-            segments.clear();
-            for (int i = 0; i < text.length(); i += SEGMENT_MAX_LENGTH) {
-                int end = Math.min(i + SEGMENT_MAX_LENGTH, text.length());
-                segments.add(text.substring(i, end));
-            }
         }
 
         // 确保至少有一段
@@ -439,6 +469,116 @@ public class TtsToolHandler implements ToolHandler {
             segments.add(text);
         }
 
+        log.info("TTS 文本分段完成: 共 {} 段", segments.size());
         return segments;
+    }
+
+    /**
+     * 按指定标点正则分段，保留标点。
+     */
+    private List<String> splitByPunctuation(String text, String punctuationRegex) {
+        List<String> result = new ArrayList<>();
+        Pattern pattern = Pattern.compile("(.+?(" + punctuationRegex + "))");
+        Matcher matcher = pattern.matcher(text);
+
+        int lastEnd = 0;
+        while (matcher.find()) {
+            result.add(matcher.group(1));
+            lastEnd = matcher.end();
+        }
+
+        // 添加剩余文本
+        if (lastEnd < text.length()) {
+            String remaining = text.substring(lastEnd).trim();
+            if (!remaining.isEmpty()) {
+                result.add(remaining);
+            }
+        }
+
+        // 如果没有匹配到任何分隔符，返回原文本
+        if (result.isEmpty()) {
+            result.add(text);
+        }
+
+        return result;
+    }
+
+    /**
+     * 分割超长句子：先按次级标点，若仍超长则按字节边界截断。
+     */
+    private List<String> splitLongSentence(String sentence) {
+        List<String> result = new ArrayList<>();
+        int sentenceBytes = getUtf8ByteLength(sentence);
+
+        if (sentenceBytes <= SEGMENT_MAX_BYTES) {
+            result.add(sentence);
+            return result;
+        }
+
+        // 尝试按次级标点分段
+        List<String> subParts = splitByPunctuation(sentence, "[,，、;；：:\\s]+");
+        boolean allFit = true;
+        for (String part : subParts) {
+            if (getUtf8ByteLength(part) > SEGMENT_MAX_BYTES) {
+                allFit = false;
+                break;
+            }
+        }
+
+        if (allFit) {
+            return subParts;
+        }
+
+        // 仍超长，按 UTF-8 字节边界截断
+        result.addAll(splitByByteBoundary(sentence));
+        return result;
+    }
+
+    /**
+     * 按 UTF-8 字节边界截断，确保不截断多字节字符。
+     */
+    private List<String> splitByByteBoundary(String text) {
+        List<String> result = new ArrayList<>();
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+
+        int start = 0;
+        while (start < bytes.length) {
+            int end = Math.min(start + SEGMENT_MAX_BYTES, bytes.length);
+
+            // 向回调整到有效的 UTF-8 字符边界
+            while (end < bytes.length && !isValidUtf8Start(bytes, end)) {
+                end--;
+            }
+
+            String segment = new String(bytes, start, end - start, StandardCharsets.UTF_8);
+            result.add(segment);
+            start = end;
+        }
+
+        return result;
+    }
+
+    /**
+     * 检查给定位置是否是有效的 UTF-8 字符起始字节。
+     * UTF-8 起始字节特征：
+     * - 0xxxxxxx (ASCII, 1 字节)
+     * - 110xxxxx (2 字节起始)
+     * - 1110xxxx (3 字节起始)
+     * - 11110xxx (4 字节起始)
+     * 后续字节格式为 10xxxxxx
+     */
+    private boolean isValidUtf8Start(byte[] bytes, int index) {
+        if (index >= bytes.length) return true;
+        int b = bytes[index] & 0xFF;
+        // 起始字节不应是 10xxxxxx (0x80-0xBF)
+        return (b & 0xC0) != 0x80;
+    }
+
+    /**
+     * 计算 UTF-8 字节长度。
+     */
+    private int getUtf8ByteLength(String str) {
+        if (str == null) return 0;
+        return str.getBytes(StandardCharsets.UTF_8).length;
     }
 }
